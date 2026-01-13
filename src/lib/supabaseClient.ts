@@ -48,6 +48,41 @@ export async function getRandomCandidates(count: number = 10): Promise<Student[]
     return shuffled.slice(0, Math.min(count, shuffled.length));
 }
 
+// Get random candidates filtered by level (e.g., "ม.1", "ม.2", etc.)
+export async function getRandomCandidatesByLevel(level: string, count: number = 10): Promise<Student[]> {
+    const { data, error } = await supabase
+        .from('students')
+        .select('*')
+        .eq('is_winner', false)
+        .eq('level', level);
+
+    if (error) {
+        console.error('Error fetching candidates by level:', error);
+        return [];
+    }
+
+    if (!data || data.length === 0) return [];
+
+    // Shuffle and pick random candidates
+    const shuffled = [...data].sort(() => Math.random() - 0.5);
+    return shuffled.slice(0, Math.min(count, shuffled.length));
+}
+
+// Get count of non-winners by level
+export async function getRemainingCountByLevel(level: string): Promise<number> {
+    const { count, error } = await supabase
+        .from('students')
+        .select('*', { count: 'exact', head: true })
+        .eq('is_winner', false)
+        .eq('level', level);
+
+    if (error) {
+        console.error('Error getting remaining count by level:', error);
+        return 0;
+    }
+    return count || 0;
+}
+
 export async function markAsWinner(studentId: number): Promise<boolean> {
     const { error } = await supabase
         .from('students')

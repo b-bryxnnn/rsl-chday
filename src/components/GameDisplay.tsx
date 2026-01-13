@@ -2,20 +2,29 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { CheckCircle, SkipForward, RefreshCw, Users, Sparkles } from 'lucide-react';
-import { Student, getRandomCandidates, markAsWinner } from '@/lib/supabaseClient';
+import { CheckCircle, SkipForward, RefreshCw, Users, Sparkles, Trophy, Gift } from 'lucide-react';
+import { Student, getRandomCandidates, getRandomCandidatesByLevel, markAsWinner } from '@/lib/supabaseClient';
 
 // Scramble characters for the decrypt effect
 const SCRAMBLE_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789@#$%&*!?<>[]{}';
 const THAI_SCRAMBLE = 'กขคงจฉชซฌญฎฏฐฑฒณดตถทธนบปผฝพฟภมยรลวศษสหฬอฮ';
 
+// ระดับชั้น 1-6
+const LEVELS = ['1', '2', '3', '4', '5', '6'];
+
 type RevealStage = 0 | 1 | 2 | 3 | 4;
+type DrawMode = 'all' | 'by-level';
 
 export default function GameDisplay() {
     const [candidates, setCandidates] = useState<Student[]>([]);
     const [currentIndex, setCurrentIndex] = useState<number>(0);
     const [revealStage, setRevealStage] = useState<RevealStage>(0);
     const [isLoading, setIsLoading] = useState<boolean>(false);
+
+    // Mode selection state
+    const [drawMode, setDrawMode] = useState<DrawMode>('all');
+    const [selectedLevel, setSelectedLevel] = useState<string>('1');
+
     const [scrambledTexts, setScrambledTexts] = useState({
         level: '',
         room: '',
@@ -60,19 +69,26 @@ export default function GameDisplay() {
         }
     }, [currentStudent, revealStage, updateScrambledTexts]);
 
-    // Load candidates
+    // Load candidates based on mode
     const loadCandidates = useCallback(async () => {
         setIsLoading(true);
         setRevealStage(0);
         setCurrentIndex(0);
-        const newCandidates = await getRandomCandidates(10);
+
+        let newCandidates: Student[];
+        if (drawMode === 'by-level') {
+            newCandidates = await getRandomCandidatesByLevel(selectedLevel, 10);
+        } else {
+            newCandidates = await getRandomCandidates(10);
+        }
+
         setCandidates(newCandidates);
         setIsLoading(false);
-    }, []);
+    }, [drawMode, selectedLevel]);
 
     useEffect(() => {
         loadCandidates();
-    }, []);
+    }, [loadCandidates]);
 
     // Fire confetti effect
     const fireConfetti = async () => {
@@ -152,11 +168,12 @@ export default function GameDisplay() {
             }
 
             // Shortcuts for Stage 4 (Action Phase)
+            // รองรับทั้งภาษาอังกฤษ (y/n) และภาษาไทย (ั/ื)
             if (revealStage === 4 && !isLoading) {
-                if (e.key.toLowerCase() === 'y') {
+                if (e.key.toLowerCase() === 'y' || e.key === 'ั') {
                     handleConfirm();
                 }
-                if (e.key.toLowerCase() === 'n') {
+                if (e.key.toLowerCase() === 'n' || e.key === 'ื') {
                     handleSkip();
                 }
             }
@@ -218,6 +235,72 @@ export default function GameDisplay() {
                         </div>
                     </div>
                 </header>
+
+                {/* Mode Selector */}
+                <div className="p-4 border-b border-green-900 bg-green-950/30">
+                    <div className="max-w-7xl mx-auto">
+                        <div className="flex flex-wrap items-center gap-4">
+                            {/* Mode Buttons */}
+                            <div className="flex items-center gap-2">
+                                <span className="text-green-600 text-sm">โหมด:</span>
+                                <button
+                                    onClick={() => setDrawMode('all')}
+                                    className={`flex items-center gap-1 px-3 py-2 border-2 transition-all duration-300 ${drawMode === 'all'
+                                        ? 'border-cyan-400 bg-cyan-500/20 text-cyan-300'
+                                        : 'border-green-700 text-green-500 hover:border-green-500'
+                                        }`}
+                                >
+                                    <Gift className="w-4 h-4" />
+                                    รวมทุกชั้น
+                                </button>
+                                <button
+                                    onClick={() => setDrawMode('by-level')}
+                                    className={`flex items-center gap-1 px-3 py-2 border-2 transition-all duration-300 ${drawMode === 'by-level'
+                                        ? 'border-yellow-400 bg-yellow-500/20 text-yellow-300'
+                                        : 'border-green-700 text-green-500 hover:border-green-500'
+                                        }`}
+                                >
+                                    <Trophy className="w-4 h-4" />
+                                    รางวัลใหญ่ (แยกตาม ม.)
+                                </button>
+                            </div>
+
+                            {/* Level Selector - Only show when by-level mode */}
+                            {drawMode === 'by-level' && (
+                                <div className="flex items-center gap-2">
+                                    <span className="text-yellow-600 text-sm">เลือกชั้น:</span>
+                                    <div className="flex gap-1">
+                                        {LEVELS.map((level) => (
+                                            <button
+                                                key={level}
+                                                onClick={() => setSelectedLevel(level)}
+                                                className={`px-3 py-1 border-2 transition-all duration-300 text-sm ${selectedLevel === level
+                                                    ? 'border-yellow-400 bg-yellow-500/30 text-yellow-200'
+                                                    : 'border-yellow-800 text-yellow-600 hover:border-yellow-500'
+                                                    }`}
+                                            >
+                                                {level}
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Mode Description */}
+                        <div className="mt-2 text-xs">
+                            {drawMode === 'all' ? (
+                                <span className="text-cyan-600">
+                                    [ สุ่มจากนักเรียนทุกระดับชั้นรวมกัน ]
+                                </span>
+                            ) : (
+                                <span className="text-yellow-600">
+                                    [ 🏆 รางวัลใหญ่ - สุ่มเฉพาะนักเรียน {selectedLevel} ]
+                                </span>
+                            )}
+                        </div>
+                    </div>
+                </div>
 
                 {/* Main Display Area */}
                 <main className="flex-1 flex items-center justify-center p-8">
