@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { CheckCircle, SkipForward, RefreshCw, Users, Sparkles, Trophy, Gift } from 'lucide-react';
+import { CheckCircle, SkipForward, RefreshCw, Sparkles, Trophy, Gift } from 'lucide-react';
 import { Student, getRandomCandidates, getRandomCandidatesByLevel, markAsWinner } from '@/lib/supabaseClient';
 
 // Scramble characters for the decrypt effect
@@ -12,8 +12,159 @@ const THAI_SCRAMBLE = 'กขคงจฉชซฌญฎฏฐฑฒณดตถ
 // ระดับชั้น 1-6
 const LEVELS = ['1', '2', '3', '4', '5', '6'];
 
-type RevealStage = 0 | 1 | 2 | 3 | 4;
+// Changed to 3 stages: 0=encrypted, 1=level, 2=room, 3=number+name
+type RevealStage = 0 | 1 | 2 | 3;
 type DrawMode = 'all' | 'by-level';
+
+// ===== SOUND EFFECTS =====
+// Background music: public/sounds/excitement.mp3 (loops continuously)
+// Button sounds: Web Audio API
+class HackerSounds {
+    private bgAudio: HTMLAudioElement | null = null;
+    private audioContext: AudioContext | null = null;
+    private isInitialized = false;
+    private isBgPlaying = false;
+
+    private getContext(): AudioContext {
+        if (!this.audioContext) {
+            this.audioContext = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
+        }
+        if (this.audioContext.state === 'suspended') {
+            this.audioContext.resume();
+        }
+        return this.audioContext;
+    }
+
+    init() {
+        if (this.isInitialized) return;
+        this.isInitialized = true;
+        // Start background music on init
+        this.startBackgroundMusic();
+    }
+
+    // Start looping background music
+    startBackgroundMusic() {
+        if (this.isBgPlaying) return;
+
+        try {
+            if (!this.bgAudio) {
+                this.bgAudio = new Audio('/sounds/excitement.mp3');
+                this.bgAudio.loop = true; // Loop continuously
+                this.bgAudio.volume = 0.5; // Lower volume so button sounds are audible
+            }
+
+            this.bgAudio.play().catch(e => console.log('Audio play failed:', e));
+            this.isBgPlaying = true;
+        } catch (e) {
+            console.log('Audio error:', e);
+        }
+    }
+
+    // Stop background music (only if needed)
+    stopBackgroundMusic() {
+        if (this.bgAudio) {
+            this.bgAudio.pause();
+            this.bgAudio.currentTime = 0;
+        }
+        this.isBgPlaying = false;
+    }
+
+    // Button unlock sound - dramatic electronic impact
+    playUnlockSound() {
+        const ctx = this.getContext();
+
+        // Sub-bass hit
+        const subOsc = ctx.createOscillator();
+        const subGain = ctx.createGain();
+        subOsc.connect(subGain);
+        subGain.connect(ctx.destination);
+        subOsc.type = 'sine';
+        subOsc.frequency.setValueAtTime(80, ctx.currentTime);
+        subOsc.frequency.exponentialRampToValueAtTime(25, ctx.currentTime + 0.4);
+        subGain.gain.setValueAtTime(0.5, ctx.currentTime);
+        subGain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.5);
+        subOsc.start(ctx.currentTime);
+        subOsc.stop(ctx.currentTime + 0.5);
+
+        // Rising synth whoosh
+        const sweepOsc = ctx.createOscillator();
+        const sweepGain = ctx.createGain();
+        sweepOsc.connect(sweepGain);
+        sweepGain.connect(ctx.destination);
+        sweepOsc.type = 'sawtooth';
+        sweepOsc.frequency.setValueAtTime(150, ctx.currentTime);
+        sweepOsc.frequency.exponentialRampToValueAtTime(2000, ctx.currentTime + 0.15);
+        sweepGain.gain.setValueAtTime(0.15, ctx.currentTime);
+        sweepGain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.2);
+        sweepOsc.start(ctx.currentTime);
+        sweepOsc.stop(ctx.currentTime + 0.2);
+
+        // Confirmation beeps
+        [0, 0.08, 0.16].forEach((delay, i) => {
+            const beepOsc = ctx.createOscillator();
+            const beepGain = ctx.createGain();
+            beepOsc.connect(beepGain);
+            beepGain.connect(ctx.destination);
+            beepOsc.type = 'sine';
+            beepOsc.frequency.value = 600 + i * 200;
+            const startTime = ctx.currentTime + delay;
+            beepGain.gain.setValueAtTime(0.1, startTime);
+            beepGain.gain.exponentialRampToValueAtTime(0.01, startTime + 0.06);
+            beepOsc.start(startTime);
+            beepOsc.stop(startTime + 0.06);
+        });
+    }
+
+    // Victory sound - epic bass drop
+    playVictorySound() {
+        const ctx = this.getContext();
+
+        // Massive bass drop
+        const dropOsc = ctx.createOscillator();
+        const dropGain = ctx.createGain();
+        dropOsc.connect(dropGain);
+        dropGain.connect(ctx.destination);
+        dropOsc.type = 'sine';
+        dropOsc.frequency.setValueAtTime(60, ctx.currentTime);
+        dropOsc.frequency.exponentialRampToValueAtTime(20, ctx.currentTime + 0.6);
+        dropGain.gain.setValueAtTime(0.7, ctx.currentTime);
+        dropGain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.8);
+        dropOsc.start(ctx.currentTime);
+        dropOsc.stop(ctx.currentTime + 0.8);
+
+        // Victory chord
+        [261.63, 329.63, 392.00, 523.25].forEach((freq, i) => {
+            const chordOsc = ctx.createOscillator();
+            const chordGain = ctx.createGain();
+            chordOsc.connect(chordGain);
+            chordGain.connect(ctx.destination);
+            chordOsc.type = 'sine';
+            chordOsc.frequency.value = freq;
+            const startTime = ctx.currentTime + 0.1;
+            chordGain.gain.setValueAtTime(0.12 - i * 0.02, startTime);
+            chordGain.gain.exponentialRampToValueAtTime(0.01, startTime + 0.8);
+            chordOsc.start(startTime);
+            chordOsc.stop(startTime + 0.8);
+        });
+
+        // Sparkles
+        for (let i = 0; i < 8; i++) {
+            const sparkleOsc = ctx.createOscillator();
+            const sparkleGain = ctx.createGain();
+            sparkleOsc.connect(sparkleGain);
+            sparkleGain.connect(ctx.destination);
+            sparkleOsc.type = 'sine';
+            sparkleOsc.frequency.value = 1500 + Math.random() * 2000;
+            const startTime = ctx.currentTime + 0.2 + i * 0.08;
+            sparkleGain.gain.setValueAtTime(0.06, startTime);
+            sparkleGain.gain.exponentialRampToValueAtTime(0.001, startTime + 0.15);
+            sparkleOsc.start(startTime);
+            sparkleOsc.stop(startTime + 0.15);
+        }
+    }
+}
+
+const hackerSounds = new HackerSounds();
 
 export default function GameDisplay() {
     const [candidates, setCandidates] = useState<Student[]>([]);
@@ -32,9 +183,9 @@ export default function GameDisplay() {
         name: '',
     });
     const scrambleIntervalRef = useRef<NodeJS.Timeout | null>(null);
+    const soundIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
     const currentStudent = candidates[currentIndex];
-    const waitingStudents = candidates.slice(currentIndex + 1);
 
     // Generate scrambled text
     const generateScramble = useCallback((length: number, useThai: boolean = false): string => {
@@ -58,9 +209,10 @@ export default function GameDisplay() {
 
     // Start scramble animation
     useEffect(() => {
-        if (currentStudent && revealStage < 4) {
+        if (currentStudent && revealStage < 3) {
             updateScrambledTexts();
             scrambleIntervalRef.current = setInterval(updateScrambledTexts, 50);
+
             return () => {
                 if (scrambleIntervalRef.current) {
                     clearInterval(scrambleIntervalRef.current);
@@ -121,13 +273,21 @@ export default function GameDisplay() {
 
     // Handle spacebar press for reveal
     const handleReveal = useCallback(() => {
-        if (!currentStudent || revealStage >= 4) return;
+        if (!currentStudent || revealStage >= 3) return;
+
+        // Initialize and start background music on first interaction
+        hackerSounds.init();
 
         const newStage = (revealStage + 1) as RevealStage;
         setRevealStage(newStage);
 
-        if (newStage === 4) {
+        if (newStage === 3) {
+            // Final reveal - victory sound + confetti
+            hackerSounds.playVictorySound();
             fireConfetti();
+        } else {
+            // Intermediate stage - unlock sound
+            hackerSounds.playUnlockSound();
         }
     }, [currentStudent, revealStage]);
 
@@ -136,6 +296,7 @@ export default function GameDisplay() {
         if (!currentStudent) return;
 
         setIsLoading(true);
+        hackerSounds.playUnlockSound(); // Play sound on confirm
         await markAsWinner(currentStudent.id);
 
         // Move to next candidate or reload if none left
@@ -150,6 +311,7 @@ export default function GameDisplay() {
 
     // Handle skip (don't update DB, just move to next)
     const handleSkip = useCallback(() => {
+        hackerSounds.playUnlockSound(); // Play sound on skip
         if (currentIndex < candidates.length - 1) {
             setCurrentIndex(prev => prev + 1);
             setRevealStage(0);
@@ -167,9 +329,9 @@ export default function GameDisplay() {
                 handleReveal();
             }
 
-            // Shortcuts for Stage 4 (Action Phase)
+            // Shortcuts for Stage 3 (Action Phase)
             // รองรับทั้งภาษาอังกฤษ (y/n) และภาษาไทย (ั/ื)
-            if (revealStage === 4 && !isLoading) {
+            if (revealStage === 3 && !isLoading) {
                 if (e.key.toLowerCase() === 'y' || e.key === 'ั') {
                     handleConfirm();
                 }
@@ -184,6 +346,7 @@ export default function GameDisplay() {
     }, [handleReveal, revealStage, isLoading, handleConfirm, handleSkip]);
 
     // Get display text based on reveal stage
+    // Stage 1: Level, Stage 2: Room, Stage 3: Number + Name
     const getDisplayText = (field: 'level' | 'room' | 'number' | 'name', stageRequired: number) => {
         if (!currentStudent) return '---';
         if (revealStage >= stageRequired) {
@@ -336,7 +499,6 @@ export default function GameDisplay() {
                                         boxShadow: '0 0 60px rgba(0, 255, 255, 0.3), inset 0 0 60px rgba(0, 255, 255, 0.1)',
                                     }}
                                 >
-                                    {/* ... Same UI as before ... */}
                                     {/* Corner decorations */}
                                     <div className="absolute top-0 left-0 w-8 h-8 border-t-4 border-l-4 border-cyan-400" />
                                     <div className="absolute top-0 right-0 w-8 h-8 border-t-4 border-r-4 border-cyan-400" />
@@ -349,8 +511,8 @@ export default function GameDisplay() {
                                         </span>
                                     </div>
 
-                                    {/* Student Info Display */}
-                                    <div className="grid grid-cols-3 gap-6 mb-8">
+                                    {/* Student Info Display - 2 columns for Level and Room */}
+                                    <div className="grid grid-cols-2 gap-6 mb-8">
                                         {/* Level */}
                                         <div className="text-center">
                                             <p className="text-cyan-600 text-sm mb-2">LEVEL</p>
@@ -358,7 +520,7 @@ export default function GameDisplay() {
                                                 key={`level-${revealStage}`}
                                                 initial={{ opacity: 0, y: 20 }}
                                                 animate={{ opacity: 1, y: 0 }}
-                                                className={`text-4xl font-bold ${revealStage >= 1 ? 'text-green-300' : 'text-cyan-400'
+                                                className={`text-5xl font-bold ${revealStage >= 1 ? 'text-green-300' : 'text-cyan-400'
                                                     }`}
                                                 style={{
                                                     textShadow: revealStage >= 1
@@ -377,7 +539,7 @@ export default function GameDisplay() {
                                                 key={`room-${revealStage}`}
                                                 initial={{ opacity: 0, y: 20 }}
                                                 animate={{ opacity: 1, y: 0 }}
-                                                className={`text-4xl font-bold ${revealStage >= 2 ? 'text-green-300' : 'text-cyan-400'
+                                                className={`text-5xl font-bold ${revealStage >= 2 ? 'text-green-300' : 'text-cyan-400'
                                                     }`}
                                                 style={{
                                                     textShadow: revealStage >= 2
@@ -388,49 +550,54 @@ export default function GameDisplay() {
                                                 {getDisplayText('room', 2)}
                                             </motion.p>
                                         </div>
+                                    </div>
 
-                                        {/* Number */}
-                                        <div className="text-center">
-                                            <p className="text-cyan-600 text-sm mb-2">NUMBER</p>
-                                            <motion.p
-                                                key={`number-${revealStage}`}
-                                                initial={{ opacity: 0, y: 20 }}
-                                                animate={{ opacity: 1, y: 0 }}
-                                                className={`text-4xl font-bold ${revealStage >= 3 ? 'text-green-300' : 'text-cyan-400'
-                                                    }`}
-                                                style={{
-                                                    textShadow: revealStage >= 3
-                                                        ? '0 0 20px rgba(0, 255, 100, 0.8)'
-                                                        : '0 0 10px rgba(0, 255, 255, 0.5)',
-                                                }}
-                                            >
-                                                {getDisplayText('number', 3)}
-                                            </motion.p>
+                                    {/* Number + Name - revealed together at stage 3 */}
+                                    <div className="text-center border-t border-cyan-800 pt-6">
+                                        <div className="grid grid-cols-2 gap-6 items-center">
+                                            {/* Number */}
+                                            <div className="text-center">
+                                                <p className="text-cyan-600 text-sm mb-2">NUMBER</p>
+                                                <motion.p
+                                                    key={`number-${revealStage}`}
+                                                    initial={{ opacity: 0, y: 20 }}
+                                                    animate={{ opacity: 1, y: 0 }}
+                                                    className={`text-5xl font-bold ${revealStage >= 3 ? 'text-yellow-300' : 'text-cyan-400'
+                                                        }`}
+                                                    style={{
+                                                        textShadow: revealStage >= 3
+                                                            ? '0 0 30px rgba(255, 255, 0, 0.8)'
+                                                            : '0 0 10px rgba(0, 255, 255, 0.5)',
+                                                    }}
+                                                >
+                                                    {getDisplayText('number', 3)}
+                                                </motion.p>
+                                            </div>
+
+                                            {/* Name */}
+                                            <div className="text-center">
+                                                <p className="text-cyan-600 text-sm mb-2">NAME</p>
+                                                <motion.p
+                                                    key={`name-${revealStage}`}
+                                                    initial={{ opacity: 0, scale: 0.9 }}
+                                                    animate={{ opacity: 1, scale: 1 }}
+                                                    className={`text-4xl font-bold ${revealStage >= 3 ? 'text-yellow-300' : 'text-cyan-400'
+                                                        }`}
+                                                    style={{
+                                                        textShadow: revealStage >= 3
+                                                            ? '0 0 30px rgba(255, 255, 0, 0.8), 0 0 60px rgba(255, 200, 0, 0.5)'
+                                                            : '0 0 10px rgba(0, 255, 255, 0.5)',
+                                                    }}
+                                                >
+                                                    {getDisplayText('name', 3)}
+                                                </motion.p>
+                                            </div>
                                         </div>
                                     </div>
 
-                                    {/* Name */}
-                                    <div className="text-center border-t border-cyan-800 pt-6">
-                                        <p className="text-cyan-600 text-sm mb-3">NAME</p>
-                                        <motion.p
-                                            key={`name-${revealStage}`}
-                                            initial={{ opacity: 0, scale: 0.9 }}
-                                            animate={{ opacity: 1, scale: 1 }}
-                                            className={`text-5xl font-bold ${revealStage >= 4 ? 'text-yellow-300' : 'text-cyan-400'
-                                                }`}
-                                            style={{
-                                                textShadow: revealStage >= 4
-                                                    ? '0 0 30px rgba(255, 255, 0, 0.8), 0 0 60px rgba(255, 200, 0, 0.5)'
-                                                    : '0 0 10px rgba(0, 255, 255, 0.5)',
-                                            }}
-                                        >
-                                            {getDisplayText('name', 4)}
-                                        </motion.p>
-                                    </div>
-
-                                    {/* Reveal Progress */}
+                                    {/* Reveal Progress - 3 stages now */}
                                     <div className="mt-8 flex justify-center gap-2">
-                                        {[1, 2, 3, 4].map((stage) => (
+                                        {[1, 2, 3].map((stage) => (
                                             <div
                                                 key={stage}
                                                 className={`w-4 h-4 rounded-full transition-all duration-300 ${revealStage >= stage
@@ -444,7 +611,7 @@ export default function GameDisplay() {
                                     {/* Instructions */}
                                     <div className="mt-6 text-center">
                                         <p className="text-cyan-700 text-sm">
-                                            {revealStage < 4
+                                            {revealStage < 3
                                                 ? '[ PRESS SPACEBAR TO DECRYPT ]'
                                                 : '[ DECRYPTION COMPLETE - WINNER REVEALED ]'}
                                         </p>
@@ -453,7 +620,7 @@ export default function GameDisplay() {
                             </AnimatePresence>
 
                             {/* Action Buttons */}
-                            {revealStage === 4 && (
+                            {revealStage === 3 && (
                                 <motion.div
                                     initial={{ opacity: 0, y: 20 }}
                                     animate={{ opacity: 1, y: 0 }}
@@ -468,7 +635,7 @@ export default function GameDisplay() {
                                         style={{ boxShadow: '0 0 30px rgba(0, 255, 0, 0.5)' }}
                                     >
                                         <CheckCircle className="w-6 h-6" />
-                                        ยืนยัน (CONFIRM)
+                                        ยืนยัน (Y)
                                     </button>
                                     <button
                                         onClick={handleSkip}
@@ -478,40 +645,20 @@ export default function GameDisplay() {
                       transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
                                     >
                                         <SkipForward className="w-6 h-6" />
-                                        ไม่อยู่ (SKIP)
+                                        ไม่อยู่ (N)
                                     </button>
                                 </motion.div>
                             )}
 
-                            {/* Waiting List */}
-                            {waitingStudents.length > 0 && (
-                                <div className="border border-green-900 p-4">
-                                    <div className="flex items-center gap-2 mb-3">
-                                        <Users className="w-4 h-4 text-green-600" />
-                                        <span className="text-green-600 text-sm">WAITING LIST ({waitingStudents.length})</span>
-                                    </div>
-                                    <div className="flex flex-wrap gap-2">
-                                        {waitingStudents.map((student, idx) => (
-                                            <div
-                                                key={student.id}
-                                                className="px-3 py-1 border border-green-800 text-green-700 text-sm bg-green-950/30"
-                                            >
-                                                #{idx + 2} [ENCRYPTED]
-                                            </div>
-                                        ))}
-                                    </div>
-                                </div>
-                            )}
                         </div>
                     )}
                 </main>
 
                 {/* Footer */}
                 <footer className="p-4 border-t border-green-900 text-center text-green-700 text-sm">
-                    <p>[ SYSTEM STATUS: ACTIVE ] [ PRESS SPACE TO REVEAL ]</p>
+                    <p>[ SYSTEM STATUS: ACTIVE ] [ PRESS SPACE TO REVEAL ] [ SOUND: ON 🔊 ]</p>
                 </footer>
 
-                {/* Custom CSS for animations */}
             </div>
         </div>
     );
