@@ -61,14 +61,14 @@ export default function GameDisplay() {
     }, [currentStudent, revealStage, updateScrambledTexts]);
 
     // Load candidates
-    const loadCandidates = async () => {
+    const loadCandidates = useCallback(async () => {
         setIsLoading(true);
         setRevealStage(0);
         setCurrentIndex(0);
         const newCandidates = await getRandomCandidates(10);
         setCandidates(newCandidates);
         setIsLoading(false);
-    };
+    }, []);
 
     useEffect(() => {
         loadCandidates();
@@ -116,7 +116,7 @@ export default function GameDisplay() {
     }, [currentStudent, revealStage]);
 
     // Handle confirm (mark as winner)
-    const handleConfirm = async () => {
+    const handleConfirm = useCallback(async () => {
         if (!currentStudent) return;
 
         setIsLoading(true);
@@ -124,36 +124,47 @@ export default function GameDisplay() {
 
         // Move to next candidate or reload if none left
         if (currentIndex < candidates.length - 1) {
-            setCurrentIndex(currentIndex + 1);
+            setCurrentIndex(prev => prev + 1);
             setRevealStage(0);
         } else {
             await loadCandidates();
         }
         setIsLoading(false);
-    };
+    }, [currentStudent, currentIndex, candidates.length, loadCandidates]);
 
     // Handle skip (don't update DB, just move to next)
-    const handleSkip = () => {
+    const handleSkip = useCallback(() => {
         if (currentIndex < candidates.length - 1) {
-            setCurrentIndex(currentIndex + 1);
+            setCurrentIndex(prev => prev + 1);
             setRevealStage(0);
         } else {
             loadCandidates();
         }
-    };
+    }, [currentIndex, candidates.length, loadCandidates]);
 
     // Keyboard event listener
     useEffect(() => {
         const handleKeyDown = (e: KeyboardEvent) => {
+            // Spacebar for reveal
             if (e.code === 'Space') {
                 e.preventDefault();
                 handleReveal();
+            }
+
+            // Shortcuts for Stage 4 (Action Phase)
+            if (revealStage === 4 && !isLoading) {
+                if (e.key.toLowerCase() === 'y') {
+                    handleConfirm();
+                }
+                if (e.key.toLowerCase() === 'n') {
+                    handleSkip();
+                }
             }
         };
 
         window.addEventListener('keydown', handleKeyDown);
         return () => window.removeEventListener('keydown', handleKeyDown);
-    }, [handleReveal]);
+    }, [handleReveal, revealStage, isLoading, handleConfirm, handleSkip]);
 
     // Get display text based on reveal stage
     const getDisplayText = (field: 'level' | 'room' | 'number' | 'name', stageRequired: number) => {
